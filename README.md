@@ -44,7 +44,7 @@ cd src/hyperka/ea_apps/
 python main.py --input ../../../dataset/dbp15k/zh_en/mtranse/0_3/
 ```
 
-For example, to run HyperKA (75/25 dim) on DB111K-174 for entity type inference, use the following commands:
+For example, to run HyperKA (75/15 dim) on DB111K-174 for entity type inference, use the following commands:
 ```bash
 cd src/hyperka/et_apps/
 python main.py --input ../../../dataset/joie/db/ --neg_typing_margin 0.1 --neg_triple_margin 0.2 --nums_neg 30 --mapping_neg_nums 30 --batch_size 20000 --epochs 100
