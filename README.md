@@ -4,7 +4,7 @@ Source code for EMNLP-2020 paper "[Knowledge Association with Hyperbolic Knowled
 > Capturing associations for knowledge graphs (KGs) through entity alignment, entity type inference and other related tasks benefits NLP applications with comprehensive knowledge representations. Recent related methods built on Euclidean embeddings are challenged by the hierarchical structures and different scales of KGs. They also depend on high embedding dimensions to realize enough expressiveness. Differently, we explore with low-dimensional hyperbolic embeddings for knowledge association. We propose a hyperbolic relational graph neural network for KG embedding and capture knowledge associations with a hyperbolic transformation. Extensive experiments on entity alignment and type inference demonstrate the effectiveness and efficiency of our method.
 
 ## Datasets
-We use three datasets in our experiments, i.e., [DBP15K](https://github.com/nju-websoft/JAPE) for entity alignment, [YAGO26K-906](https://github.com/JunhengH/joie-kdd19) and [DB111K-174](https://github.com/JunhengH/joie-kdd19) for type inference. We provide the datasets in the folder [./dataset/](https://github.com/nju-websoft/HyperKA/tree/master/dataset) of the repository.
+We use three datasets in our experiments, i.e., [DBP15K](https://github.com/nju-websoft/JAPE) for entity alignment, [YAGO26K-906](https://github.com/JunhengH/joie-kdd19) and [DB111K-174](https://github.com/JunhengH/joie-kdd19) for type inference. We provide the datasets in the folder [./dataset/](https://github.com/nju-websoft/HyperKA/tree/main/dataset) of the repository.
 
 ## Code
 
