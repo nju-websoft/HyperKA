@@ -5,12 +5,17 @@ import time
 import sys
 import gc
 import ast
+import ray
 
+from hyperka.ea_funcs.test_funcs import sim_handler_hyperbolic
+from hyperka.ea_funcs.train_bp import bootstrapping
+from hyperka.hyperbolic.metric import normalization
 from hyperka.ea_apps.model import HyperKA
 from hyperka.ea_funcs.train_funcs import generate_pos_neg_batch, generate_batch_via_neighbour
 from hyperka.ea_funcs.train_funcs import get_model, find_neighbours_multi
 
 g = 1024 * 1024
+ray.init()
 
 parser = argparse.ArgumentParser(description='HyperKE4EA')
 parser.add_argument('--input', type=str, default='../../../dataset/dbp15k/zh_en/mtranse/0_3/')
@@ -35,7 +40,12 @@ parser.add_argument('--nums_threads', type=int, default=8)
 parser.add_argument('--epochs', type=int, default=800)
 parser.add_argument('--test_interval', type=int, default=4)
 
+parser.add_argument('--sim_th', type=float, default=0.75)
+parser.add_argument('--nearest_k', type=int, default=10)
+parser.add_argument('--start_bp', type=int, default=40)
 parser.add_argument('--bp_param', type=float, default=0.05)
+parser.add_argument('--is_bp', type=ast.literal_eval, default=False)
+parser.add_argument('--heuristic', type=ast.literal_eval, default=True)
 parser.add_argument('--combine', type=ast.literal_eval, default=True)
 
 
@@ -147,6 +157,25 @@ def train_triple_1step(model, triples1, triples2, neighbours1, neighbours2, step
     return triple_loss, round(end - start, 2)
 
 
+def semi_alignment(model:HyperKA, params):
+    print()
+    t = time.time()
+    refs1_embed = model.eval_output_embed(model.ref_ent1, is_map=True)
+    refs2_embed = model.eval_output_embed(model.ref_ent2, is_map=False)
+    sim_mat = sim_handler_hyperbolic(refs1_embed, refs2_embed, 5, params.nums_threads)
+    sim_mat = normalization(sim_mat)
+    # temp_sim_th = (np.mean(sim_mat) + np.max(sim_mat)) / 2
+    # sim_th = (params.sim_th + temp_sim_th) / 2
+    # print("min, mean, and max of sim mat, sim_th = ", np.min(sim_mat), np.mean(sim_mat), np.max(sim_mat), sim_th)
+    sim_th = params.sim_th
+    new_alignment, entities1, entities2 = bootstrapping(sim_mat, model.ref_ent1, model.ref_ent2, model.new_alignment,
+                                                        sim_th, params.nearest_k, is_edit=True,
+                                                        heuristic=params.heuristic)
+    model.new_alignment = list(new_alignment)
+    model.new_alignment_pairs = [(entities1[i], entities2[i]) for i in range(len(entities1))]
+    print("semi-supervised alignment costs time = {:.3f} s\n".format(time.time() - t))
+
+
 if __name__ == '__main__':
     args = parser.parse_args()
     print(args)
@@ -155,11 +184,16 @@ if __name__ == '__main__':
     hits1, old_hits1 = None, None
     trunc_ent_num1 = int(len(triples1.ent_list) * (1.0 - args.epsilon4triple))
     print("trunc ent num for triples:", trunc_ent_num1)
-    epochs_each_iteration = 10
+    if args.is_bp:
+        epochs_each_iteration = 5
+    else:
+        epochs_each_iteration = 10
     total_iteration = args.epochs // epochs_each_iteration
     for iteration in range(1, total_iteration + 1):
         print("iteration", iteration)
         train_k_epochs(iteration, model, triples1, triples2, epochs_each_iteration, trunc_ent_num1, args)
         if iteration % args.test_interval == 0:
             model.test(k=0)
+        if iteration >= args.start_bp and args.is_bp:
+            semi_alignment(model, args)
     model.test()

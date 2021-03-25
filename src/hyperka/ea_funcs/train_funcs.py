@@ -1,18 +1,10 @@
-import math
-import multiprocessing
 import gc
-import sys
+import ray
 import numpy as np
-import time
 import random
-import os
-import psutil
-import scipy as sp
-from scipy import io
 from sklearn import preprocessing
 
 from hyperka.ea_apps.util import gen_adj
-
 import hyperka.ea_funcs.utils as ut
 from hyperka.hyperbolic.metric import compute_hyperbolic_similarity
 from hyperka.ea_funcs.test_funcs import sim_handler_hyperbolic
@@ -89,6 +81,7 @@ def get_model(folder, kge_model, params):
     return ori_triples1, ori_triples2, model
 
 
+@ray.remote(num_cpus=1)
 def find_neighbours(sub_ent_list, ent_list, sub_ent_embed, ent_embed, k, metric):
     dic = dict()
     if metric == 'euclidean':
@@ -102,7 +95,6 @@ def find_neighbours(sub_ent_list, ent_list, sub_ent_embed, ent_embed, k, metric)
             sort_index = np.argpartition(-sim_mat[i, :], k + 1)
             dic[sub_ent_list[i]] = ent_list[sort_index[0:k + 1]].tolist()
     del sim_mat
-    gc.collect()
     return dic
 
 
@@ -112,20 +104,19 @@ def find_neighbours_multi_4link_(embed1, embed2, ent_list1, ent_list2, k, params
         embed2 = preprocessing.normalize(embed2)
     sub_ent_list1 = ut.div_list(np.array(ent_list1), params.nums_threads)
     sub_ent_embed_indexes = ut.div_list(np.array(range(len(ent_list1))), params.nums_threads)
-    pool = multiprocessing.Pool(processes=len(sub_ent_list1))
     results = list()
     for i in range(len(sub_ent_list1)):
-        results.append(pool.apply_async(find_neighbours, (sub_ent_list1[i], np.array(ent_list2),
-                                                          embed1[sub_ent_embed_indexes[i], :], embed2,
-                                                          k, metric)))
-    pool.close()
-    pool.join()
+        res = find_neighbours.remote(sub_ent_list1[i], np.array(ent_list2),
+                                     embed1[sub_ent_embed_indexes[i], :], embed2, k, metric)
+        results.append(res)
     dic = dict()
-    for res in results:
-        dic = ut.merge_dic(dic, res.get())
+    for res in ray.get(results):
+        dic = ut.merge_dic(dic, res)
+    gc.collect()
     return dic
 
 
+@ray.remote(num_cpus=1)
 def find_neighbours_from_sim_mat(ent_list_x, ent_list_y, sim_mat, k):
     dic = dict()
     for i in range(sim_mat.shape[0]):
@@ -137,16 +128,14 @@ def find_neighbours_from_sim_mat(ent_list_x, ent_list_y, sim_mat, k):
 def find_neighbours_multi_4link_from_sim(ent_list_x, ent_list_y, sim_mat, k, nums_threads):
     ent_list_x_tasks = ut.div_list(np.array(ent_list_x), nums_threads)
     ent_list_x_indexes = ut.div_list(np.array(range(len(ent_list_x))), nums_threads)
-    pool = multiprocessing.Pool(processes=len(ent_list_x_tasks))
-    results = list()
-    for i in range(len(ent_list_x_tasks)):
-        results.append(pool.apply_async(find_neighbours_from_sim_mat, (ent_list_x_tasks[i], np.array(ent_list_y),
-                                                                       sim_mat[ent_list_x_indexes[i], :], k)))
-    pool.close()
-    pool.join()
     dic = dict()
-    for res in results:
-        dic = ut.merge_dic(dic, res.get())
+    rest = []
+    for i in range(len(ent_list_x_tasks)):
+        res = find_neighbours_from_sim_mat.remote(ent_list_x_tasks[i], np.array(ent_list_y),
+                                                  sim_mat[ent_list_x_indexes[i], :], k)
+        rest.append(res)
+    for res in ray.get(rest):
+        dic = ut.merge_dic(dic, res)
     return dic
 
 
@@ -166,24 +155,18 @@ def find_neighbours_multi(embed, ent_list, k, nums_threads, metric='euclidean'):
     if nums_threads > 1:
         ent_frags = ut.div_list(np.array(ent_list), nums_threads)
         ent_frag_indexes = ut.div_list(np.array(range(len(ent_list))), nums_threads)
-        pool = multiprocessing.Pool(processes=len(ent_frags))
-        results = list()
-        for i in range(len(ent_frags)):
-            results.append(pool.apply_async(find_neighbours, (ent_frags[i], np.array(ent_list),
-                                                              embed[ent_frag_indexes[i], :], embed,
-                                                              k, metric)))
-        pool.close()
-        pool.join()
         dic = dict()
-        for res in results:
-            dic = ut.merge_dic(dic, res.get())
+        rest = []
+        for i in range(len(ent_frags)):
+            res = find_neighbours.remote(ent_frags[i], np.array(ent_list), embed[ent_frag_indexes[i], :], embed,
+                                         k, metric)
+            rest.append(res)
+        for res in ray.get(rest):
+            dic = ut.merge_dic(dic, res)
     else:
         dic = find_neighbours(np.array(ent_list), np.array(ent_list), embed, embed, k, metric)
-    t1 = time.time()
-    m1 = psutil.virtual_memory().used
     del embed
     gc.collect()
-    # print("gc costs {:.3f} s, mem change {:.6f} G".format(time.time() - t1, (psutil.virtual_memory().used - m1) / g))
     return dic
 
 

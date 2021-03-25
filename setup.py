@@ -16,6 +16,8 @@ INSTALL_REQUIRES = [
     'psutil',
     'scikit-learn',
     'matplotlib',
+    'python-igraph',
+    'ray',
 ]
 
 if __name__ == '__main__':

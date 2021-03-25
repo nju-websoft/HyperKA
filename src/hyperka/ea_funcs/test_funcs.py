@@ -1,18 +1,15 @@
-import multiprocessing
-
 import gc
 import numpy as np
 import time
-from sklearn import preprocessing
-from sklearn.metrics.pairwise import euclidean_distances
-from scipy.spatial.distance import cdist
+import ray
 
 from hyperka.ea_funcs.utils import div_list
-from hyperka.hyperbolic.metric import compute_hyperbolic_similarity
+from hyperka.hyperbolic.metric import compute_hyperbolic_distances, normalization
 
 g = 1000000000
 
 
+@ray.remote(num_cpus=1)
 def cal_rank(task, sim, top_k):
     mean = 0
     mrr = 0
@@ -27,7 +24,6 @@ def cal_rank(task, sim, top_k):
         for j in range(len(top_k)):
             if rank_index < top_k[j]:
                 num[j] += 1
-        # del rank
     return mean, mrr, num
 
 
@@ -37,16 +33,14 @@ def eval_alignment_mul(sim_mat, top_k, nums_threads, mess=""):
     t_num = [0 for k in top_k]
     t_mean = 0
     t_mrr = 0
-    tasks = div_list(np.array(range(ref_num)), nums_threads)
-    pool = multiprocessing.Pool(processes=len(tasks))
-    reses = list()
-    for task in tasks:
-        reses.append(pool.apply_async(cal_rank, (task, sim_mat[task, :], top_k)))
-    pool.close()
-    pool.join()
 
-    for res in reses:
-        mean, mrr, num = res.get()
+    tasks = div_list(np.array(range(ref_num)), nums_threads)
+    results = list()
+    for task in tasks:
+        res = cal_rank.remote(task, sim_mat[task, :], top_k)
+        results.append(res)
+    for res in ray.get(results):
+        mean, mrr, num = res
         t_mean += mean
         t_mrr += mrr
         t_num += np.array(num)
@@ -112,12 +106,12 @@ def cal_rank_multi_embed(frags, dic, sub_embed, embed, top_k):
     return mean, mrr, num, mean1, mrr1, num1, prec_set
 
 
+@ray.remote(num_cpus=1)
 def cal_rank_multi_embed_hyperbolic(frags, sub_embed, embed, top_k):
     mr = 0
     mrr = 0
     hits = np.array([0 for k in top_k])
-    sim_mat = compute_hyperbolic_similarity(sub_embed, embed)
-    # print("sim mat type:", type(sim_mat))
+    sim_mat = compute_hyperbolic_similarity_single(sub_embed, embed)
     results = set()
     for i in range(len(frags)):
         ref = frags[i]
@@ -131,9 +125,7 @@ def cal_rank_multi_embed_hyperbolic(frags, sub_embed, embed, top_k):
             if rank_index < top_k[j]:
                 hits[j] += 1
         results.add((ref, aligned_e))
-
     del sim_mat
-    gc.collect()
     return mr, mrr, hits, results
 
 
@@ -146,15 +138,13 @@ def eval_alignment_hyperbolic_multi(embed1, embed2, top_k, nums_threads, mess=""
     total_alignment = set()
 
     frags = div_list(np.array(range(ref_num)), nums_threads)
-    pool = multiprocessing.Pool(processes=len(frags))
     results = list()
     for frag in frags:
-        results.append(pool.apply_async(cal_rank_multi_embed_hyperbolic, (frag, embed1[frag, :], embed2, top_k)))
-    pool.close()
-    pool.join()
+        res = cal_rank_multi_embed_hyperbolic.remote(frag, embed1[frag, :], embed2, top_k)
+        results.append(res)
 
-    for res in results:
-        mr1, mrr1, hits1, alignment = res.get()
+    for res in ray.get(results):
+        mr1, mrr1, hits1, alignment = res
         mr += mr1
         mrr += mrr1
         hits += hits1
@@ -169,9 +159,11 @@ def eval_alignment_hyperbolic_multi(embed1, embed2, top_k, nums_threads, mess=""
     mrr /= ref_num
     print("{}, hits@{} = {}, mr = {:.3f}, mrr = {:.3f}, time = {:.3f} s ".format(mess, top_k, hits, mr, mrr,
                                                                                  time.time() - t))
+    gc.collect()
     return hits[0]
 
 
+@ray.remote(num_cpus=1)
 def cal_csls_neighbor_sim(sim_mat, k):
     sorted_mat = -np.partition(-sim_mat, k + 1, axis=1)  # -np.sort(-sim_mat1)
     nearest_k = sorted_mat[:, 0:k]
@@ -181,15 +173,13 @@ def cal_csls_neighbor_sim(sim_mat, k):
 
 def csls_neighbor_sim(sim_mat, k, nums_threads):
     tasks = div_list(np.array(range(sim_mat.shape[0])), nums_threads)
-    pool = multiprocessing.Pool(processes=len(tasks))
     results = list()
     for task in tasks:
-        results.append(pool.apply_async(cal_csls_neighbor_sim, (sim_mat[task, :], k)))
-    pool.close()
-    pool.join()
+        res = cal_csls_neighbor_sim.remote(sim_mat[task, :], k)
+        results.append(res)
     sim_values = None
-    for res in results:
-        val = res.get()
+    for res in ray.get(results):
+        val = res
         if sim_values is None:
             sim_values = val
         else:
@@ -200,15 +190,13 @@ def csls_neighbor_sim(sim_mat, k, nums_threads):
 
 def sim_handler_hyperbolic(embed1, embed2, k, nums_threads):
     tasks = div_list(np.array(range(embed1.shape[0])), nums_threads)
-    pool = multiprocessing.Pool(processes=len(tasks))
     results = list()
     for task in tasks:
-        results.append(pool.apply_async(compute_hyperbolic_similarity, (embed1[task, :], embed2)))
-    pool.close()
-    pool.join()
+        res = compute_hyperbolic_similarity.remote(embed1[task, :], embed2)
+        results.append(res)
     sim_lists = list()
-    for res in results:
-        sim_lists.append(res.get())
+    for res in ray.get(results):
+        sim_lists.append(res)
     sim_mat = np.concatenate(sim_lists, axis=0)
     if k == 0:
         return sim_mat
@@ -219,3 +207,34 @@ def sim_handler_hyperbolic(embed1, embed2, k, nums_threads):
     del sim_mat
     gc.collect()
     return csls_sim_mat
+
+
+@ray.remote(num_cpus=1)
+def compute_hyperbolic_similarity(embeds1, embeds2):
+    x1, y1 = embeds1.shape  # <class 'numpy.ndarray'>
+    x2, y2 = embeds2.shape
+    assert y1 == y2
+    dist_vec_list = list()
+    for i in range(x1):
+        embed1 = embeds1[i, ]  # <class 'numpy.ndarray'> (y1,)
+        embed1 = np.reshape(embed1, (1, y1))  # (1, y1)
+        embed1 = np.repeat(embed1, x2, axis=0)  # (x2, y1)
+        dist_vec = compute_hyperbolic_distances(embed1, embeds2)
+        dist_vec_list.append(dist_vec)
+    dis_mat = np.row_stack(dist_vec_list)  # (x1, x2)
+    return normalization(-dis_mat)
+
+
+def compute_hyperbolic_similarity_single(embeds1, embeds2):
+    x1, y1 = embeds1.shape  # <class 'numpy.ndarray'>
+    x2, y2 = embeds2.shape
+    assert y1 == y2
+    dist_vec_list = list()
+    for i in range(x1):
+        embed1 = embeds1[i, ]  # <class 'numpy.ndarray'> (y1,)
+        embed1 = np.reshape(embed1, (1, y1))  # (1, y1)
+        embed1 = np.repeat(embed1, x2, axis=0)  # (x2, y1)
+        dist_vec = compute_hyperbolic_distances(embed1, embeds2)
+        dist_vec_list.append(dist_vec)
+    dis_mat = np.row_stack(dist_vec_list)  # (x1, x2)
+    return normalization(-dis_mat)

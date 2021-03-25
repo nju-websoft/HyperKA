@@ -1,5 +1,5 @@
 # HyperKA
-Source code for EMNLP-2020 paper "[Knowledge Association with Hyperbolic Knowledge Graph Embeddings](https://arxiv.org/pdf/2010.02162.pdf)".
+Source code for EMNLP-2020 paper "[Knowledge Association with Hyperbolic Knowledge Graph Embeddings](https://www.aclweb.org/anthology/2020.emnlp-main.460/)".
 
 > Capturing associations for knowledge graphs (KGs) through entity alignment, entity type inference and other related tasks benefits NLP applications with comprehensive knowledge representations. Recent related methods built on Euclidean embeddings are challenged by the hierarchical structures and different scales of KGs. They also depend on high embedding dimensions to realize enough expressiveness. Differently, we explore with low-dimensional hyperbolic embeddings for knowledge association. We propose a hyperbolic relational graph neural network for KG embedding and capture knowledge associations with a hyperbolic transformation. Extensive experiments on entity alignment and type inference demonstrate the effectiveness and efficiency of our method.
 
@@ -29,11 +29,15 @@ src/
 * Pandas
 * Matplotlib
 * psutil
+* python-igraph
+* Graph-tool
+* ray
 
 ### Installation
 We recommend creating a new conda environment to install and run HyperKA. You should first install Python 3.6 and Tensorflow-GPU 1.14 using conda. 
 Then, HyperKA can be installed using pip with the following script:
 ```bash
+conda install -c conda-forge graph-tool==2.29
 pip install -e . -i https://pypi.python.org/simple
 ```
 
@@ -44,7 +48,13 @@ cd src/hyperka/ea_apps/
 python main.py --input ../../../dataset/dbp15k/zh_en/mtranse/0_3/
 ```
 
-For example, to run HyperKA (75/15 dim) on DB111K-174 for entity type inference, use the following commands:
+To run HyperKA (75 dim) on DBP15K ZH-EN under the bootstrapping setting, please use the following commands:
+```bash
+cd src/hyperka/ea_apps/
+python main.py --input ../../../dataset/dbp15k/zh_en/mtranse/0_3/ --is_bp True --learning_rate 0.0005 --epsilon4triple 0.99
+```
+
+To run HyperKA (75/15 dim) on DB111K-174 for entity type inference, use the following commands:
 ```bash
 cd src/hyperka/et_apps/
 python main.py --input ../../../dataset/joie/db/ --neg_typing_margin 0.1 --neg_triple_margin 0.2 --nums_neg 30 --mapping_neg_nums 30 --batch_size 20000 --epochs 100
